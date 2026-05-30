@@ -1,0 +1,21 @@
+# Build directories
+/build/
+/out/
+cmake-build-*/
+
+# CMake-generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.cmake
+CTestTestfile.cmake
+compile_commands.json
+
+# Ninja
+.ninja_deps
+.ninja_log
+build.ninja
+rules.ninja
+
+# Misc tooling caches
+.cache/
