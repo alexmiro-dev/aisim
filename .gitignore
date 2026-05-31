@@ -19,3 +19,9 @@ rules.ninja
 
 # Misc tooling caches
 .cache/
+
+# Editor / tooling local config
+.claude/
+.vscode/
+.idea/
+*.swp
