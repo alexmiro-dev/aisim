@@ -10,6 +10,10 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Named C++ modules require dependency scanning (CMake 3.28+, Ninja/MSVC gens).
+# The hexagon layers under src/ are each a module library.
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -37,12 +41,11 @@ else()
         "the '${AISIM_OLLAMA_MODEL}' model. The 'pull-model' target is disabled.")
 endif()
 
-# --- HTTP client used to talk to the Ollama REST API -------------------------
-find_package(CURL REQUIRED)
-find_package(Threads REQUIRED)
-
-# --- Executable --------------------------------------------------------------
-add_executable(aisim src/main.cpp)
-target_link_libraries(aisim PRIVATE CURL::libcurl Threads::Threads)
-target_compile_definitions(aisim PRIVATE AISIM_MODEL="${AISIM_OLLAMA_MODEL}")
-target_compile_options(aisim PRIVATE -Wall -Wextra -Wpedantic)
+# --- The application (hexagon layers) ----------------------------------------
+# Each layer under src/ is its own module library; the dependency rule (arrows
+# point inward) is enforced by what each target links. See src/CMakeLists.txt
+# and docs/architecture-v2.md §5.6.
+#
+# A worked, self-contained Ollama client (C++ modules + Catch2) lives in
+# examples/ollama-client/. It is a standalone project and is NOT added here.
+add_subdirectory(src)

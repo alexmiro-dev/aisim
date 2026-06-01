@@ -1,5 +1,5 @@
-# Build directories
-/build/
+# Build directories (root and any subproject, e.g. examples/*/build)
+build/
 /out/
 cmake-build-*/
 
