@@ -17,13 +17,13 @@ module;
 
 #include <print>
 
-export module aisim.app;
+export module aisim.infrastructure;
 
 import aisim.adapter;
 import aisim.application;
 import aisim.domain;
 
-export namespace aisim::app {
+export namespace aisim::infrastructure {
 
 // The composition root / application object. Construct, run(), shutdown().
 class CompositionRoot {
@@ -41,4 +41,4 @@ public:
     void shutdown() noexcept {}
 };
 
-}  // namespace aisim::app
+}  // namespace aisim::infrastructure

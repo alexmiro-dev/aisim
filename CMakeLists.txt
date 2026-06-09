@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 
 project(aisim
     VERSION 0.1.0
-    DESCRIPTION "AI simulation harness driven by a local LLM"
+    DESCRIPTION "AI-assisted code practice for interviews"
     LANGUAGES CXX)
 
 # --- C++26 (latest standard the toolchain advertises) ------------------------

@@ -7,9 +7,9 @@
 // A worked, self-contained Ollama client (C++ modules + Catch2) lives in
 // examples/ollama-client/ — a separate project, not built from here.
 
-import aisim.app;
+import aisim.infrastructure;
 
 int main() {
-    aisim::app::CompositionRoot app;
+    aisim::infrastructure::CompositionRoot app;
     return app.run();
 }

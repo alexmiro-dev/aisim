@@ -6,11 +6,9 @@
 > nothing about libraries, STL types, or build files. Those are downstream
 > choices that must not leak into the architecture.
 >
-> **Companion (background only):** the older
-> [`use-cases.md`](./use-cases.md) describes the product intent in depth (the
-> skill-gap practice loop). This document takes a **lean** view of that domain —
-> enough to be faithful, not so much that the architecture drowns in product
-> detail.
+> This document takes a **lean** view of the product domain — enough to be
+> faithful to the skill-gap practice loop, not so much that the architecture
+> drowns in product detail.
 
 ---
 
@@ -263,9 +261,8 @@ classDiagram
 > **Lean note.** CV and learning-goal *ingestion* exist (see `ProfilePort` and
 > `IngestProfile`), but in this lean model they are **feeders that produce
 > `Skill`s and seed `Mastery`** — not a full CV/JobDescription/SkillGap entity
-> graph. If the richer skill-gap loop from [`use-cases.md`](./use-cases.md) is
-> wanted as first-class entities, that is a deliberate expansion — see
-> **Open questions**.
+> graph. If the richer skill-gap loop is wanted as first-class entities, that is
+> a deliberate expansion — see **Open questions**.
 
 ---
 
@@ -403,14 +400,14 @@ src/
 │   ├── ports/             driving ports: ConversationPort, PracticePort, …
 │   └── use_cases/         SubmitPrompt, IngestProfile, RequestPractice, SolveTask
 │
-├── adapter/           # adapter::      technology lives here — app:: + domain::
+├── adapter/           # adapter::      technology lives here — application:: + domain::
 │   ├── ollama/            OllamaGateway          (implements ModelGateway)
 │   ├── sqlite/            *Repository            (implement repository ports)
 │   ├── ws/                WebSocketHub, LiveResultPublisher
 │   ├── rest/              RestEndpoint
 │   └── cli/               CliDriver
 │
-├── app/               # infrastructure::  composition root + main()
+├── infrastructure/    # infrastructure::  composition root + main()
 │   ├── composition_root.cppm   the one place that names concrete types
 │   └── main.cpp                tiny: construct → run() → shutdown()
 │
@@ -423,7 +420,7 @@ src/
 | `src/domain/` | `domain::` — inside | **nothing** | `User`, `Mastery`, `SkillAssessor`; the driven ports `ModelGateway`, `ResultPublisher`, `*Repository` |
 | `src/application/` | `application::` | `domain::` only | driving ports `ConversationPort`/`PracticePort`/`ProfilePort`; use cases `SubmitPrompt`, `SolveTask` |
 | `src/adapter/` | `adapter::` — outside | `application::`, `domain::` | `ollama::OllamaGateway`, `sqlite::*Repository`, `ws::WebSocketHub`, `rest::RestEndpoint`, `cli::CliDriver` |
-| `src/app/` | `infrastructure::` | everything (it wires) | `CompositionRoot`, `Config`, `Logger`, `Executor`, `EventBus`, `main` |
+| `src/infrastructure/` | `infrastructure::` | everything (it wires) | `CompositionRoot`, `Config`, `Logger`, `Executor`, `EventBus`, `main` |
 | `src/ui/qt/` | `adapter::` (driving) | driving ports only | the Qt desktop front-end |
 
 **Two placement decisions worth stating:**
@@ -450,7 +447,7 @@ the dependency rule is checked by the build, not by discipline:
 | `aisim_domain` | *(nothing)* | `aisim.domain` |
 | `aisim_application` | `aisim_domain` | `aisim.application` |
 | `aisim_adapter` | `aisim_application`, `aisim_domain` | `aisim.adapter` |
-| `aisim_app` | all of the above | `aisim.app` |
+| `aisim_infrastructure` | all of the above | `aisim.infrastructure` |
 
 Because `aisim_domain` links nothing, a domain file that does `import
 aisim.adapter;` **fails to build** (`module 'aisim.adapter' not found`) — the
@@ -614,3 +611,182 @@ These genuinely change the model and were left out rather than assumed:
 5. **Multiple conversations/tasks at once.** Is concurrent activity (several live
    streams in flight) a requirement, or is one-at-a-time acceptable for v1? It
    affects how hard the executor and publisher must work.
+
+---
+
+## 10. Implementation roadmap (single developer)
+
+> **Status:** proposed. This section turns the *shape* above into an *order of
+> work*. Guiding rule, from the hexagon's own logic: build a **walking skeleton**
+> — the thinnest slice that runs end-to-end through a real port — then **thicken
+> one vertical slice at a time**. Every phase is demoable and testable at its
+> end; integration is never deferred. Each phase is sized for one developer
+> (roughly a few days).
+>
+> The payoff of the architecture shows up at every step: each new **port** gets a
+> **fake**, so the core stays testable without Ollama, SQLite, or sockets, and
+> each **adapter** is purely additive — no core change.
+
+### 10.0 Decisions this roadmap assumes (see §9)
+
+The open questions in §9 change the model, so the roadmap commits to **lean
+defaults** to avoid forking. Flip any of these deliberately — #1 and #3 in
+particular expand scope materially.
+
+| §9 | Question | Assumed default for v1 |
+|---|---|---|
+| 1 | Domain depth | **Lean** core (Skill, Mastery, PracticeTask, Conversation). No CV→JD→demand→SkillGap entity graph. |
+| 2 | CV vs. learning goal | **Learning goal first**; CV ingestion later, through the same `ProfilePort`. |
+| 3 | Phone reach | **Same LAN only**. No relay / public auth / TLS section. |
+| 4 | Live-feedback granularity | **Debounced code snapshots** (on pause/save), not per-keystroke. |
+| 5 | Concurrency | **One live stream at a time** is acceptable; ports allow more, but v1 doesn't build for it. |
+
+### 10.1 Where the code already is
+
+The four module libraries and the inward-only link rules from §5.6 **already
+exist** as a scaffold (placeholder `layer_name()` per layer, a tiny `main.cpp`, a
+`CompositionRoot` shell). The worked Ollama client in `examples/ollama-client/`
+is the reference to port `OllamaGateway` from. So "set up the structure" is done;
+the roadmap below fills it with behaviour.
+
+### 10.2 Phases
+
+**Critical path to a usable product:** P0 → P1 → P2 → P3 → P4 → P8 yields a
+streaming chat GUI. P5 → P6 → P7 then layer in the actual *practice* purpose.
+
+```mermaid
+flowchart TD
+    P0["P0 foundation<br/>(config · logging · test harness)"] --> P1["P1 walking skeleton<br/>CLI → generate → Ollama"]
+    P1 --> P2["P2 live streaming<br/>ResultPublisher · EventBus · cancel"]
+    P2 --> P3["P3 persistence + stateful chat<br/>sqlite · ContextAssembler"]
+    P3 --> P4["P4 REST + WebSocket front-ends"]
+    P4 --> P8["P8 Qt desktop UI"]
+    P3 --> P5["P5 Profile<br/>skills from goal/CV"]
+    P5 --> P6["P6 Practice: request a task"]
+    P6 --> P7["P7 Guided solving + mastery<br/>(highest risk)"]
+    P4 --> P9["P9 hardening · LAN security · embeddings"]
+    P7 --> P9
+    P8 --> P9
+```
+
+#### P0 — Finish the foundation (`infrastructure::`, `domain::` kernel)
+*The structure exists; make it testable and give it a shared kernel.*
+
+- Wire **Catch2 + ctest** across all four module libraries; one build/link smoke
+  test per layer.
+- A **clang debug preset** with ASan/UBSan in a local script.
+- Pure shared kernel in `domain::`: a `Result<T>` / `Error` type and strong-typed
+  IDs (`UserId`, `SessionId`, …).
+- `infrastructure::Logger` — thin sink interface (+ null/console sink).
+- `infrastructure::Config` — defaults → file (XDG `~/.config/aisim/`) → env
+  (keep `OLLAMA_HOST`).
+- 🎯 **DoD:** `ctest` green across targets, ASan clean, config loads.
+
+#### P1 — Walking skeleton: one prompt round-trips (non-streaming)
+*Thinnest end-to-end slice. CLI is the cheapest driving adapter, so it goes first.*
+
+- `domain::ModelGateway` driven port — **`generate()` + `capabilities()` only**.
+- `application::ConversationPort` (driving) with single-shot `submitPrompt`;
+  `application::SubmitPrompt` use case over `ModelGateway`.
+- `adapter::ollama::OllamaGateway` implementing `ModelGateway` — **ported from
+  `examples/ollama-client/`**; libcurl linked `PRIVATE`.
+- `FakeModelGateway` (deterministic, no network) for unit tests.
+- `adapter::cli::CliDriver` calling the driving port; `CompositionRoot` wires it.
+- 🧪 unit (`SubmitPrompt` + fake), Ollama error-body→`Error` mapping; E2E (CLI →
+  real local model → non-empty answer).
+- 🎯 **MILESTONE:** ask on the CLI, get a model answer; engine swappable behind
+  the port.
+
+#### P2 — Live streaming (`ResultPublisher` · `EventBus` · cancellation)
+*The canonical flow of §6.1: tokens stream as produced.*
+
+- Add `stream(prompt, params, cancel) → tokenStream` to `ModelGateway`;
+  `OllamaGateway` sets `"stream":true`.
+- `domain::ResultPublisher` driven port; `infrastructure::EventBus` (thread-safe
+  hand-off) + `infrastructure::Executor` (bounded pool, AI work off the front-end
+  thread).
+- `SubmitPrompt` evolves: stream → `publish(sessionId, chunk)` per token.
+- Cooperative **cancellation** threaded port → use case → gateway.
+- A console `ResultPublisher` so the CLI renders the live stream.
+- 🧪 cancel mid-stream leaks nothing (ASan/TSan); bus fan-out.
+- 🎯 **DoD:** live token streaming on the CLI with working cancel, leak-clean.
+
+#### P3 — Persistence + stateful chat (`adapter::sqlite` · `ContextAssembler`)
+*Multi-turn conversation that survives restart (§6.1 persist steps).*
+
+- Entities `User`, `Conversation`, `Turn`; `domain::ConversationRepository` port.
+- `adapter::sqlite::*` repositories (SQLite linked `PRIVATE`, WAL, single writer).
+- `domain::ContextAssembler` service: history → bounded prompt context.
+- `SubmitPrompt`: append user turn → assemble context → stream → append assistant
+  turn.
+- `ConversationPort.openSession` / `history`; first-run captures a mandatory user
+  name.
+- 🧪 repo round-trip (in-memory DB), deterministic context truncation, multi-turn
+  carries prior turns, restart survives history.
+- 🎯 **DoD:** real multi-turn chat persisted across restarts.
+
+#### P4 — REST + WebSocket front-ends (`adapter::rest` · `adapter::ws`)
+*Add network front-ends over the same ports — zero core change.*
+
+- `adapter::rest::RestEndpoint` for request/response (history, settings, later
+  CV/skills).
+- `adapter::ws::WebSocketHub` + `adapter::ws::LiveResultPublisher` (the real
+  `ResultPublisher`, riding the `EventBus`) — fans chunks to the originating
+  connection.
+- 🧪 WS client gets incremental tokens; final persisted turn = concatenation;
+  E2E `POST /generate`.
+- 🎯 **MILESTONE:** usable streaming chat over REST/WS (UI still pending).
+
+#### P5 — Profile: skills from a goal/CV (`ProfilePort` · `IngestProfile`)
+*Tell aisim what to get better at (§6.2). Goal first, CV as a second feeder.*
+
+- Entities `Skill`, `Mastery`; `SkillRepository` + `MasteryRepository` ports +
+  sqlite impls.
+- `application::ProfilePort` (`setLearningGoal` first, then `ingestCv`) +
+  `IngestProfile`: `ModelGateway` extracts skills → upsert canonical skills →
+  seed baseline mastery.
+- REST/CLI routes; "skills detected" view data.
+- 🧪 goal/CV text → normalized skills, mastery seeded.
+- 🎯 **DoD:** free text → a canonical skill set with baseline mastery.
+
+#### P6 — Practice loop: request a task (`PracticePort` · `RequestPractice`)
+
+- Entity `PracticeTask` (with `origin`); `TaskRepository` port + sqlite impl.
+- `domain::SkillAssessor` (pick the lowest-mastery skill).
+- `application::RequestPractice` (`PracticePort.requestTask`): assessor →
+  `ModelGateway` generates a task → persist.
+- 🧪 assessor prefers low mastery; generated task persisted under its skill.
+- 🎯 **DoD:** "give me something to practice" returns a stored, skill-tagged task.
+
+#### P7 — Guided solving + mastery update (`SolveTask` · `MasteryPolicy`) — highest risk
+*§6.3: live coaching + mastery bump. The trickiest "non-intrusive" tuning.*
+
+- Entity `Solution`; `domain::MasteryPolicy` (pure score update).
+- `application::SolveTask` (`PracticePort.solveTask`): stream hints via
+  `ResultPublisher` → compute new score via `MasteryPolicy` → update
+  `MasteryRepository` + persist `Solution`.
+- WS protocol for **debounced snapshots** (decision §10.0 #4); hint
+  rate-limit/dedupe.
+- 🧪 wrong/wasteful solution → relevant hint; correct → fewer hints; mastery moves.
+- 🎯 **MILESTONE — fully usable practice tool** (on manually-assessed skills).
+
+#### P8 — Qt desktop UI (`src/ui/qt`, a driving adapter)
+
+- Minimal Qt front-end over the driving ports only: name on first run, chat with
+  streamed reply, history, pick-a-skill / solve-a-task with live hints.
+- 🎯 **MILESTONE:** the loop end-to-end in a real GUI.
+
+#### P9 — Hardening & reach (ongoing)
+
+- Deterministic **shutdown** in `CompositionRoot` (stop accepting → drain streams
+  → flush writes → close store, reverse order — §7).
+- Bound the `Executor`; `/health` exposes core + engine + DB status.
+- **LAN security** (decision §10.0 #3): shared token, `AuthGuard` on HTTP + WS
+  handshake, localhost-by-default bind, optional phone client.
+- **Optional `EmbeddingGateway`** + `capabilities()`-gated semantic skill
+  matching (string-match fallback).
+- Whole suite under TSan + ASan/UBSan in local CI.
+
+> This roadmap deliberately follows the **lean** scope of §10.0 #1 — the
+> JD/demand gap machinery is the largest thing to revisit if the full skill-gap
+> loop is wanted.
